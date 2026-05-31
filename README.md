@@ -33,7 +33,6 @@ The node has 5 modes, switchable with a single click:
 Clone this repo into your ComfyUI `custom_nodes` folder:
 
 ```
-cd ComfyUI/custom_nodes
 git clone https://github.com/yanokusnir-ai/one-node-flux-2-klein.git
 ```
 
