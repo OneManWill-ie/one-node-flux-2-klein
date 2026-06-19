@@ -549,7 +549,7 @@ app.registerExtension({
           promptPaint:  saved.promptPaint!==undefined?saved.promptPaint:(saved.pill==="inpaint"?saved.prompt||"":""),
           promptFs:     saved.promptFs!==undefined?saved.promptFs:(saved.pill==="faceswap"?saved.prompt||"":""),
           // LoRAs
-          userLoras:    saved.userLoras||[{name:"",strength:1.0},{name:"",strength:1.0},{name:"",strength:1.0}],
+          userLoras:    (saved.userLoras||[{name:"",strength:1.0},{name:"",strength:1.0},{name:"",strength:1.0}]).map(u=>({enabled:true,...u})),
           // Generation state
           generating:   false,
           _pendingMeta: null,
@@ -6103,8 +6103,8 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           const has=v&&v!=="none";
           S.userLoras[idx].name=has?v:"";
           if(!has){ S.userLoras[idx].strength=0; ulStr.value="0"; }
-          else if(S.userLoras[idx].strength===0){ S.userLoras[idx].strength=1; ulStr.value="1"; }
-          _ulUpdateBtn();persist();
+          else { S.userLoras[idx].enabled=true; if(S.userLoras[idx].strength===0){ S.userLoras[idx].strength=1; ulStr.value="1"; } }
+          _ulUpdateBtn();_updateBypassBtn();persist();
           _refreshTrigWords(v);
         });
         ulDD.el.style.flex="1";ulDD.el.style.minWidth="0";
@@ -6120,6 +6120,33 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           ulStr.value=String(S.userLoras[idx].strength);persist(); };
         ulStr.oninput=()=>{ S.userLoras[idx].strength=+ulStr.value||0;persist(); };
 
+        const ulBypass=mk("button",{
+          background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",
+          borderRadius:"6px",cursor:"pointer",color:C.text,fontSize:"9px",fontWeight:"700",
+          padding:"5px 8px",outline:"none",transition:"all .15s",flexShrink:"0",
+        });
+        const _updateBypassBtn=()=>{
+          const has=S.userLoras[idx].name&&S.userLoras[idx].name!=="none";
+          const enabled=S.userLoras[idx].enabled!==false;
+          ulBypass.style.display=has?"inline-flex":"none";
+          ulBypass.textContent="Bypass";
+          if(enabled){
+            ulBypass.style.background="rgba(255,255,255,.08)";
+            ulBypass.style.borderColor="rgba(255,255,255,.18)";
+            ulBypass.style.color=C.text;
+          } else {
+            ulBypass.style.background="#592659";
+            ulBypass.style.borderColor="#743c74";
+            ulBypass.style.color=C.text;
+          }
+        };
+        ulBypass.onclick=()=>{
+          if(!S.userLoras[idx].name||S.userLoras[idx].name==="none") return;
+          S.userLoras[idx].enabled = S.userLoras[idx].enabled!==false ? false : true;
+          _updateBypassBtn(); _ulUpdateBtn(); persist();
+        };
+        _updateBypassBtn();
+
         const ulClr=mk("button",{
           background:"rgba(255,80,80,.08)",border:"1px solid rgba(255,80,80,.25)",borderRadius:"6px",
           cursor:"pointer",color:"rgba(255,100,100,.7)",fontSize:"9px",fontWeight:"700",
@@ -6129,19 +6156,22 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         ulClr.onmouseenter=()=>{ ulClr.style.background="rgba(255,80,80,.18)";ulClr.style.color="#ff6666"; };
         ulClr.onmouseleave=()=>{ ulClr.style.background="rgba(255,80,80,.08)";ulClr.style.color="rgba(255,100,100,.7)"; };
         ulClr.onclick=()=>{
-          S.userLoras[idx]={name:"",strength:0};ulDD.set("none");ulStr.value="0";
-          _ulUpdateBtn();persist();
+          S.userLoras[idx]={name:"",strength:0,enabled:true};ulDD.set("none");ulStr.value="0";
+          _updateBypassBtn();_ulUpdateBtn();persist();
           trigRow.style.display="none";
         };
 
-        rowCtrl.append(ulDD.el,ulStr,ulClr);
+        rowCtrl.append(ulDD.el,ulStr,ulBypass,ulClr);
         row.append(rowLbl,rowCtrl,trigRow);
         row._dd=ulDD;row._str=ulStr;
+        // Expose bypass button updater so external code (e.g. meta restore) can refresh visuals
+        row._updateBypassBtn = _updateBypassBtn;
 
         // Restore trigger words display if lora already selected
         if(S.userLoras[idx].name&&S.userLoras[idx].name!=="none"){
           _refreshTrigWords(S.userLoras[idx].name);
         }
+        _updateBypassBtn();
         return row;
       };
       const _ulRowEls=[_mkULRow(0),_mkULRow(1),_mkULRow(2)];
@@ -6164,7 +6194,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         await _loadCustomTriggers();
         const trigParts=[];
         for(const ul of S.userLoras){
-          if(!ul.name||ul.name==="none"||!(+(ul.strength||0)>0)) continue;
+          if(!ul.name||ul.name==="none"||ul.enabled===false||!(+(ul.strength||0)>0)) continue;
           // Custom trigger words override metadata
           const custom=_getCustomTrigger(ul.name);
           if(custom){ trigParts.push(custom); continue; }
@@ -7283,7 +7313,8 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           mask:_isInpaintSnap?(_maskName||null):null,
           outpaintExpand:_isOutpaintSnap?{top:_opTop,right:_opRight,bottom:_opBottom,left:_opLeft}:null,
           useSizeSource:(activePill==="edit")?(_useSizeSource||null):null,
-          userLoras:S.userLoras.filter(l=>l.name&&l.name!=="none"&&+(l.strength||0)>0).map(l=>({n:l.name.split(/[\\/]/).pop(),s:l.strength})),
+          // Save all selected LoRAs and record whether they were enabled (not bypassed)
+          userLoras:S.userLoras.filter(l=>l.name&&l.name!=="none").map(l=>({n:l.name.split(/[\\/]/).pop(),s:l.strength,e: (l.enabled!==false)})),
           ...(S.advancedUI?{steps:S.steps||4, cfg:S.cfg!==undefined?S.cfg:1,
             sampler:S.sampler||"er_sde", scheduler:S.scheduler||"simple",
             advancedUI:true}:{}),
@@ -7363,7 +7394,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           const toPrev=(p)=>typeof p==="string"?[p,0]:p;
           let prev=chainSrc;
           (S.userLoras||[]).forEach((ul,i)=>{
-            if(!ul.name||ul.name==="none"||!(+(ul.strength||0)>0)) return;
+            if(!ul.name||ul.name==="none"||ul.enabled===false||!(+(ul.strength||0)>0)) return;
             const id=`${idPrefix}UL${i+1}`;
             prompt[id]={
               inputs:{lora_name:ul.name,strength_model:+(ul.strength??1.0),model:toPrev(prev)},
@@ -8353,7 +8384,10 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
                 loraOpts.find(o=>nd(o).split("/").pop()===basename);
               if(match&&match!=="none"){
                 S.userLoras[i].name=match; S.userLoras[i].strength=+(ul.s??1);
+                // Restore enabled/bypassed state if present (default = enabled)
+                S.userLoras[i].enabled = (ul.e===undefined)?true:(ul.e!==false);
                 _ulRowEls[i]._dd.set(match); _ulRowEls[i]._str.value=String(S.userLoras[i].strength);
+                if(typeof _ulRowEls[i]._updateBypassBtn==="function") _ulRowEls[i]._updateBypassBtn();
               }
             });
           }
